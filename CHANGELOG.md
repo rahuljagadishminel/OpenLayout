@@ -18,6 +18,12 @@
   A **Select** window sets which object types can be selected (instances, vias, shapes, pins,
   labels, boundary, the frame), and the LSW locks layers as in Virtuoso (right-click; AS / NS -
   NS leaves instances and vias out too); box selections follow both.
+- **Standard-Cell Frame window**: any stack of N and P regions, each with its own width in gate
+  pitches (Add row, Remove, Move up / down, All gate pitches equal), rails placed so that every
+  region reaches its supply (or set per boundary), with a live preview.
+- **Chaining is less eager**: a transistor chains only when dropped onto its neighbour's last
+  source / drain (or overlapping it); dropped beside it - dummy gates side by side or shared - it
+  stays apart.
 - **More rows**: a frame stretched over more rows (e.g. an N/P/N cell) covers them; row
   transistors snap to the nearest half-row line (fins on the fin grid), a transistor dropped above
   the first row stays in that row, and transistors flipped top to bottom take part in chaining.

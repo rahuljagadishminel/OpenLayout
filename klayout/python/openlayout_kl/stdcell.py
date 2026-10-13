@@ -1,7 +1,8 @@
 """Custom standard cells in the open layout view: the cell frame (template) and chaining commands.
 
-- draw_frame() / insert_frame(): draws the standard-cell frame (boundary, well/implant split, VT,
-  fin rows, M1 + LIG rails, GCUT, edge dummy gates) as plain shapes at the origin of the cell - no
+- draw_frame() / draw_frame_regions() / insert_frame(): draws the standard-cell frame (boundary,
+  well/implant split, VT, fin rows, M1 + LIG rails, GCUT, edge dummy gates) - the classic nMOS-under-
+  pMOS row, or any stack of N and P regions (frame_form.py) - as plain shapes at the origin of the cell - no
   extra hierarchy level, every shape selectable and editable - and labels the rails as the VDD /
   VSS pins. The shapes carry the property 1 = "ol:frame", so drawing the frame again (another width
   or VT) replaces them; an older frame PCell instance is replaced the same way.
@@ -11,6 +12,7 @@
 - chain_selected(): chaining of the selected transistors.
 - after_move(): called when a move / align is done - snaps moved transistors into chains.
 """
+import json
 import math
 
 import pya
@@ -18,7 +20,7 @@ import pya
 from . import chain, picking
 from .asap7 import LAYERS, PIN
 from .connectivity import PROP, load_conn
-from .pcells import CELL_HEIGHT, CPP, LIBRARY, stdcell_geometry
+from .pcells import CELL_HEIGHT, CPP, LIBRARY, frame_geometry, frame_rails
 from .picking import FRAME_TAG     # property 1 of the frame's shapes
 
 FRAME = "stdcell"          # the earlier frame PCell (still converted when found)
@@ -103,28 +105,81 @@ def default_width(cell):
     return max(3, math.ceil(round(right * 1000, 3) / CPP))
 
 
-def _rail_pins(cell):
-    """VDD / VSS pin labels on the M1 rails (top level), unless the cell has them already."""
+CONFIG = 2      # property of the frame's boundary: its regions, rails and VT (json), for the frame window
+
+
+def _rail_pins(cell, pins):
+    """VDD / VSS pin labels on the M1 rails [(name, y nm)] - part of the frame (redrawn with it) -
+    unless a label of that name is there already."""
     layout = cell.layout()
     li = layout.layer(LAYERS["m1"], PIN)
-    have = {s.text_string for s in cell.shapes(li).each(pya.Shapes.STexts)}
-    for name, y in (("VSS", 0.0), ("VDD", CELL_HEIGHT / 1000)):
-        if name not in have:
-            cell.shapes(li).insert(pya.DText(name, pya.DTrans(0.03, y)))
+    have = [(s.text_string, round(s.dtext.y * 1000)) for s in cell.shapes(li).each(pya.Shapes.STexts)]
+    for name, y in pins:
+        if (name, round(y)) not in have:
+            cell.shapes(li).insert(pya.DText(name, pya.DTrans(0.03, y / 1000))).set_property(PROP, FRAME_TAG)
 
 
 def draw_frame(cell, cpp, vt="rvt"):
-    """Draw (or redraw) the frame as plain shapes in cell, at the origin."""
+    """Draw (or redraw) the classic frame - an nMOS region under a pMOS region, cpp gate pitches wide -
+    as plain shapes in cell, at the origin."""
+    draw_frame_regions(cell, [("N", int(cpp)), ("P", int(cpp))], vt)
+
+
+def draw_frame_regions(cell, regions, vt="rvt", rails=None):
+    """Draw (or redraw) a frame of stacked regions, bottom up [(type, gate pitches)] - see
+    pcells.frame_geometry; rails: {boundary: "VDD" | "VSS" | None} overrides. Returns the warnings."""
     layout = cell.layout()
     for s in frame_shapes(cell):
         s.delete()
     for inst in [i for i in cell.each_inst() if _is_frame(i)]:
         inst.delete()
-    for name, boxes in stdcell_geometry(int(cpp), vt)["shapes"].items():
+    types = [t for t, _ in regions]
+    plan, warnings = frame_rails(types, rails)
+    geo = frame_geometry(regions, vt, plan)
+    for name, boxes in geo["shapes"].items():
+        if not boxes:
+            continue
         li = layout.layer(LAYERS[name], 0)
+        region = pya.Region()
         for b in boxes:
-            cell.shapes(li).insert(pya.DBox(*(v / 1000 for v in b))).set_property(PROP, FRAME_TAG)
-    _rail_pins(cell)
+            region.insert(pya.DBox(*(v / 1000 for v in b)).to_itype(layout.dbu))
+        for poly in region.merged().each():     # one outline per piece (the boundary, a shared well)
+            shape = cell.shapes(li).insert(poly.bbox() if poly.is_box() else poly)
+            shape.set_property(PROP, FRAME_TAG)
+            if name == "boundary":
+                shape.set_property(CONFIG, json.dumps({"regions": [[t, int(c)] for t, c in regions],
+                                                       "rails": {str(k): v for k, v in (rails or {}).items()},
+                                                       "vt": vt}))
+    _rail_pins(cell, geo["pins"])
+    return warnings
+
+
+def frame_config(cell):
+    """{regions: [[type, gate pitches]] bottom up, rails: {boundary: rail} overrides, vt} of the cell's
+    frame (an older frame: N under P), or None"""
+    layout = cell.layout()
+    for s in frame_shapes(cell):
+        if layout.get_info(s.layer) == pya.LayerInfo(LAYERS["boundary"], 0) and s.property(CONFIG):
+            try:
+                c = json.loads(s.property(CONFIG))
+                return {"regions": [(t, int(n)) for t, n in c["regions"]],
+                        "rails": {int(k): v for k, v in c.get("rails", {}).items()}, "vt": c.get("vt", "rvt")}
+            except (ValueError, KeyError, TypeError):
+                break
+    p = frame_params(cell)
+    if p is None:
+        return None
+    return {"regions": [("N", p["cpp"]), ("P", p["cpp"])], "rails": {}, "vt": p["vt"]}
+
+
+def insert_frame_regions(view, regions, vt="rvt", rails=None):
+    """Draw (or redraw) a frame of stacked regions in the view's current cell (one undo step).
+    Returns the warnings."""
+    view.transaction("Standard-cell frame")
+    try:
+        return draw_frame_regions(view.active_cellview().cell, regions, vt, rails)
+    finally:
+        view.commit()
 
 
 def insert_frame(view, cpp=None, vt=None):

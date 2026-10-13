@@ -108,28 +108,112 @@ def mos_geometry_from(kind: str, params: dict) -> dict:
 
 
 def stdcell_geometry(cpp: int, vt: str = "rvt") -> dict:
-    """The standard-cell frame: cpp gate pitches wide, 270 nm (7.5 tracks) high, origin bottom-left."""
-    w = CPP * cpp
-    s = {
-        "boundary": [(0, 0, w, CELL_HEIGHT)],
-        "nselect": [(0, 0, w, MID)],
-        "pselect": [(0, MID, w, CELL_HEIGHT)],
-        "well": [(0, MID, w, CELL_HEIGHT)],
-        "fin": [(0, 13.5 + FIN_PITCH * k - 3.5, w, 13.5 + FIN_PITCH * k + 3.5) for k in range(10)],
-        "m1": [(0, -9, w, 9), (0, CELL_HEIGHT - 9, w, CELL_HEIGHT + 9)],
-        "lig": [(0, -8, w, 8), (0, CELL_HEIGHT - 8, w, CELL_HEIGHT + 8)],
-        "gcut": [(0, -22, w, 22), (0, CELL_HEIGHT - 22, w, CELL_HEIGHT + 22)],
-        "gate": [],
-        # V0 joining each LIG rail to its M1 rail at every gate-pitch column, like the library cells
-        "v0": [(CPP * k - 9, y - 9, CPP * k + 9, y + 9) for y in (0, CELL_HEIGHT) for k in range(1, cpp)],
-    }
-    if cpp >= 2:   # dummy gates on both cell edges, cut at mid-height like the library cells
-        for c in (27, w - 27):
-            s["gate"].append((c - 10, -5, c + 10, CELL_HEIGHT + 5))
-            s["gcut"].append((c - 27, MID - 22, c + 27, MID + 22))
-    if VT_LAYER.get(vt):
-        s[VT_LAYER[vt]] = [(0, 0, w, CELL_HEIGHT)]
-    return {"shapes": s, "rails": {"VSS": (0, 0), "VDD": (0, CELL_HEIGHT)}}
+    """The standard-cell frame: cpp gate pitches wide, 270 nm (7.5 tracks) high, origin bottom-left -
+    an nMOS region under a pMOS region (frame_geometry)."""
+    return frame_geometry([("N", cpp), ("P", cpp)], vt)
+
+
+SUPPLY = {"N": "VSS", "P": "VDD"}
+
+
+def _pairings(types, i=0):
+    """every way to pair adjacent N / P regions into rows (sharing their gates), from region i up"""
+    if i >= len(types) - 1:
+        yield []
+        return
+    if types[i] != types[i + 1]:
+        for rest in _pairings(types, i + 2):
+            yield [(i, i + 1)] + rest
+    yield from _pairings(types, i + 1)
+
+
+def frame_rails(types, overrides=None):
+    """The rails of a frame whose regions (bottom up) have these types ("N" / "P"): for each boundary
+    0..len(types) (bottom edge, between regions, top edge) "VSS", "VDD" or None (no rail: a gate
+    boundary, where an nMOS and a pMOS region share their gates), and warnings.
+
+    Each outer edge carries the supply of its region, two regions of the same type share a rail, and
+    an N and a P region meet without a rail where they pair into a row. Regions are paired so that
+    every region still has its supply on one of its edges (the most pairs, the lowest first);
+    overrides {boundary: "VSS" | "VDD" | None} replace the automatic choice."""
+    n = len(types)
+    overrides = overrides or {}
+    best = None
+    for pairs in _pairings(types):
+        gate = {j for _, j in pairs}
+        rails = [None] * (n + 1)
+        rails[0], rails[n] = SUPPLY[types[0]], SUPPLY[types[-1]]
+        for b in range(1, n):
+            if types[b - 1] == types[b]:
+                rails[b] = SUPPLY[types[b]]
+        conflicts = 0
+        for r in range(n):
+            outer = [b for b in (r, r + 1) if b not in gate]
+            if any(rails[b] == SUPPLY[types[r]] for b in outer):
+                continue
+            free = [b for b in outer if rails[b] is None]
+            if free:
+                rails[free[-1]] = SUPPLY[types[r]]
+            else:
+                conflicts += 1
+        key = (conflicts, -len(pairs))
+        if best is None or key < best[0]:
+            best = (key, rails, gate)
+    _key, rails, gate = best
+    for b, v in overrides.items():
+        if 0 <= int(b) <= n:
+            rails[int(b)] = v
+    warnings = []
+    for r in range(n):
+        if SUPPLY[types[r]] not in (rails[r], rails[r + 1]):
+            warnings.append(f"the {types[r]} region {r + 1} (from the bottom) has no {SUPPLY[types[r]]} rail")
+    return rails, warnings
+
+
+def frame_geometry(regions, vt: str = "rvt", rails=None) -> dict:
+    """A standard-cell frame of stacked regions, bottom up [(type "N" | "P", width in gate pitches)]:
+    each region 135 nm (five fin tracks) high with its implant (and the n-well for P), its fins and the
+    VT layer; the rails (frame_rails, or `rails` per boundary) - M1 and LIG joined by V0 at every gate
+    pitch, GCUT over them - and dummy gates at each region's edges, cut where no rail cuts them. Two N
+    regions around a P region in the middle, for example, make an N/P/N cell. Origin bottom-left."""
+    types = [t for t, _ in regions]
+    widths = [CPP * int(c) for _, c in regions]
+    if rails is None:
+        rails, warnings = frame_rails(types)
+    else:
+        warnings = []
+    s = {name: [] for name in ("boundary", "nselect", "pselect", "well", "fin", "m1", "lig", "gcut", "gate", "v0")}
+    vt_layer = VT_LAYER.get(vt)
+    if vt_layer:
+        s[vt_layer] = []
+    for r, (t, w) in enumerate(zip(types, widths)):
+        y0, y1 = MID * r, MID * (r + 1)
+        s["boundary"].append((0, y0, w, y1))
+        s["nselect" if t == "N" else "pselect"].append((0, y0, w, y1))
+        if t == "P":
+            s["well"].append((0, y0, w, y1))
+        if vt_layer:
+            s[vt_layer].append((0, y0, w, y1))
+        s["fin"] += [(0, 13.5 + FIN_PITCH * k - 3.5, w, 13.5 + FIN_PITCH * k + 3.5) for k in range(5 * r, 5 * r + 5)]
+        if w >= 2 * CPP:   # dummy gates on the region's edges
+            for c in (27, w - 27):
+                s["gate"].append((c - 10, y0 - 5, c + 10, y1 + 5))
+    pins = []
+    for b, rail in enumerate(rails):
+        y = MID * b
+        near = [widths[r] for r in (b - 1, b) if 0 <= r < len(widths)]
+        w = max(near)
+        if rail:
+            s["m1"].append((0, y - 9, w, y + 9))
+            s["lig"].append((0, y - 8, w, y + 8))
+            s["gcut"].append((0, y - 22, w, y + 22))
+            s["v0"] += [(CPP * k - 9, y - 9, CPP * k + 9, y + 9) for k in range(1, w // CPP)]
+            pins.append((rail, y))
+        elif 0 < b < len(types):
+            # a gate boundary: the edge dummies are cut here (the library cells cut them at mid-height)
+            for c in sorted({x for ww in near if ww >= 2 * CPP for x in (27, ww - 27)}):
+                s["gcut"].append((c - 27, y - 22, c + 27, y + 22))
+    return {"shapes": s, "rails": rails, "pins": pins, "warnings": warnings}
 
 
 def via_levels(bottom: str, top: str) -> list:

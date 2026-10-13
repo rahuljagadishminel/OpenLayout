@@ -109,9 +109,13 @@ def devs(kind):
     return sorted(out)
 
 
-# drop the second nMOS a little further left (still with both dummy gates): it snaps into the chain
+# drop the second nMOS a little further left (still with both dummy gates): it stays apart - a deliberate
+# gap; dropped onto the first one's last source / drain it snaps into the chain
 move((0.27, 0.05), (0.26, 0.05))
-check("a transistor dropped next to another chains (shared diffusion)", devs("nmos") == [(0, False, True), (54, True, False)],
+check("a transistor dropped beside another stays apart", devs("nmos") == [(0, False, False), (162, False, False)],
+      devs("nmos"))
+move((0.26, 0.05), (0.16, 0.05))
+check("a transistor dropped onto another chains (shared diffusion)", devs("nmos") == [(0, False, True), (54, True, False)],
       devs("nmos"))
 check("still in Select mode after the drop", view.mode_name() == "select", view.mode_name())
 
@@ -173,29 +177,38 @@ check("the selection is still usable after chaining", view.has_object_selection(
 mw.cm_undo()
 check("chaining is one undo step", devs("pmos") == [(0, False, False), (500, False, False)], devs("pmos"))
 
-# the menu command's dialogs, answered by stand-ins with KLayout's real signatures
-class Dialogs:
-    asked = []
+# the menu command's window (frame_form.FrameForm), driven by a stand-in for exec_ that edits it
+from openlayout_kl import frame_form  # noqa: E402
 
-    @staticmethod
-    def ask_int_ex(title, label, value, vmin, vmax, step):
-        Dialogs.asked.append(("width", value))
-        return 9
-
-    @staticmethod
-    def ask_item(title, label, items, index):
-        Dialogs.asked.append(("vt", items[index]))
-        return "slvt"
+seen = {}
 
 
-real_dialog, pya.InputDialog = pya.InputDialog, Dialogs
+def fake_exec(self):
+    seen["rows"] = [(r["type"], r["cpp"]) for r in self.rows]
+    seen["vt"] = self.vt_box.currentText
+    self.table.selectRow(0)
+    self.add_row()                    # an N row on top of the P row: N / P / N
+    self.equal.checked = True
+    self.spins[1].value = 9           # all rows 9 gate pitches
+    self.vt_box.setCurrentIndex(2)    # slvt
+    seen["auto"] = [b.currentText for b in self.rail_boxes]
+    return 1
+
+
+real_exec = frame_form.FrameForm.exec_
+frame_form.FrameForm.exec_ = fake_exec
 try:
     gui.instance.frame_dialog()
 finally:
-    pya.InputDialog = real_dialog
-p = stdcell.frame_params(cell)
-check("the Standard-Cell Frame menu command asks width and VT and applies them",
-      p == {"cpp": 9, "vt": "slvt"} and Dialogs.asked == [("width", 14), ("vt", "lvt")], (p, Dialogs.asked))
+    frame_form.FrameForm.exec_ = real_exec
+cfg = stdcell.frame_config(cell)
+box = stdcell.frame_box(cell)
+check("the Standard-Cell Frame window opens on the cell's frame", seen["rows"] == [("P", 14), ("N", 14)]
+      and seen["vt"] == "lvt", seen)
+check("... shows the automatic rails (N / P / N: VSS, VDD between P and the top N, a gate boundary)",
+      seen["auto"] == ["Auto (VSS)", "Auto (VDD)", "Auto (no rail)"], seen["auto"])
+check("... and draws the stack it was given", cfg["regions"] == [("N", 9), ("P", 9), ("N", 9)] and cfg["vt"] == "slvt"
+      and abs(box.top - 0.405) < 1e-9 and abs(box.right - 0.486) < 1e-9, (cfg, str(box)))
 
 # the x / y axes through the origin, switchable from the OpenLayout menu
 live = [a for a in axes._all if not a.destroyed()]

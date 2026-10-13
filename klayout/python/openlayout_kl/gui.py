@@ -10,7 +10,7 @@ from pathlib import Path
 import pya
 
 from . import generate as gen
-from . import align_tool, axes, drc, drd, generate_form, lvs, mirror, pex, stdcell, vias
+from . import align_tool, axes, drc, drd, frame_form, generate_form, lvs, mirror, pex, stdcell, vias
 from .drag_move import DragMoveFactory, after_move_hooks, move_under_mouse, stretch_under_mouse
 from .lsw import LSW
 from .nets_panel import NetsPanel
@@ -382,25 +382,24 @@ class OpenLayoutUI:
 
     # ---- custom standard cells ------------------------------------------------------------------
     def frame_dialog(self):
+        """The Standard-Cell Frame window (frame_form.py): any stack of N and P regions."""
         view = self.mw.current_view()
         cv = view.active_cellview() if view else None
         if cv is None or not cv.is_valid() or cv.cell is None or not view.is_editable():
             pya.MessageBox.info("OpenLayout", "Open the (editable) layout of the cell first.", pya.MessageBox.Ok)
             return
-        cur = stdcell.frame_params(cv.cell) or {}
-        cpp = pya.InputDialog.ask_int_ex("Standard-cell frame",
-                                      "Width in gate pitches (54 nm each; 7.5-track cell, 270 nm high):",
-                                      int(cur.get("cpp") or stdcell.default_width(cv.cell)), 1, 400, 1)
-        if cpp is None:
+        config = stdcell.frame_config(cv.cell)
+        if config is None:
+            w = stdcell.default_width(cv.cell)
+            config = {"regions": [("N", w), ("P", w)], "rails": {}, "vt": "rvt"}
+        form = frame_form.FrameForm(self.mw, config, UI)
+        if not form.exec_():
             return
-        vts = ["rvt", "lvt", "slvt"]
-        vt = pya.InputDialog.ask_item("Standard-cell frame", "Threshold voltage:", vts,
-                                      vts.index(cur.get("vt", "rvt")) if cur.get("vt") in vts else 0)
-        if vt is None:
-            return
-        stdcell.insert_frame(view, cpp, vt)
-        self.mw.message(f"Standard-cell frame: {cpp} gate pitches ({cpp * 54} nm) x 270 nm, {vt.upper()} - "
-                        "place transistors with 'Standard-cell row' on, at y = 0", 10000)
+        regions, rails, vt = form.result()
+        warnings = stdcell.insert_frame_regions(view, regions, vt, rails)
+        stack = " / ".join(f"{t}{c}" for t, c in reversed(regions))
+        self.mw.message(f"Standard-cell frame (top to bottom): {stack} gate pitches, {vt.upper()}"
+                        + (" - " + "; ".join(warnings) if warnings else ""), 10000)
 
     def chain_selected(self):
         view = self.mw.current_view()

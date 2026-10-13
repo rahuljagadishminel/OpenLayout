@@ -165,14 +165,22 @@ def info(cell, name):
 c = ly.create_cell("CHAIN")
 device(c, "MA", 0)
 device(c, "MB", 162)                                  # just touching: both dummy gates still there
+chain.update(c, moved=[find(c, "MB")], conn=conn)
+check("a transistor dropped beside another (dummy gates side by side) stays apart", info(c, "MB")[:3] == (162, False, False)
+      and info(c, "MA")[1:3] == (False, False), (info(c, "MA"), info(c, "MB")))
+find(c, "MB").transform(pya.DTrans(-0.054, 0))         # one pitch closer: a shared dummy gate
+chain.update(c, moved=[find(c, "MB")], conn=conn)
+check("... and with a shared dummy gate (a diffusion break) too", info(c, "MB")[:3] == (108, False, False),
+      info(c, "MB"))
+find(c, "MB").transform(pya.DTrans(-0.040, 0))         # dropped onto MA's last source / drain
 msgs = chain.update(c, moved=[find(c, "MB")], conn=conn)
-check("a transistor dropped next to another snaps into the chain", info(c, "MB")[:3] == (54, True, False)
+check("a transistor dropped onto another snaps into the chain", info(c, "MB")[:3] == (54, True, False)
       and info(c, "MA")[1:3] == (False, True), (info(c, "MA"), info(c, "MB"), msgs))
 act = region(ly, c, "active")
 check("chained diffusion is one piece, dummies between them gone", act.count() == 1
       and region(ly, c, "gate").count() == 4, (act.count(), region(ly, c, "gate").count()))
 
-device(c, "MC", 54 + 162)                             # touching MB: MB.d = Y, but MC.s = Z, MC.d = X
+device(c, "MC", 100)                                  # onto MB: MB.d = Y, but MC.s = Z, MC.d = X
 msgs = chain.update(c, moved=[find(c, "MC")], conn=conn)
 check("different diffusion nets do not chain", info(c, "MC")[1:3] == (False, False) and msgs, (info(c, "MC"), msgs))
 
@@ -183,11 +191,18 @@ check("moving a transistor away restores its dummy gates", info(c, "MA")[1:3] ==
 
 c2 = ly.create_cell("FLIP")
 device(c2, "MA", 0)
-device(c2, "MC", 162)                                 # touching MA: MA.d = X faces MC.s = Z; MC.d = X
+device(c2, "MC", 60)                                  # onto MA: MA.d = X faces MC.s = Z; MC.d = X
 msgs = chain.update(c2, moved=[find(c2, "MC")], conn=conn)
 x, al, ar, rot = info(c2, "MC")
 check("a transistor is flipped so the shared diffusion nets match", rot == 6 and (al, ar) == (False, True)
       and info(c2, "MA")[2], (info(c2, "MC"), msgs))
+
+c2b = ly.create_cell("ONTOP")
+device(c2b, "MA", 0)
+device(c2b, "MB", 10)                                 # right on top of MA: its s = VSS fits MA's left (s = VSS)
+chain.update(c2b, moved=[find(c2b, "MB")], conn=conn)
+check("dropped right on top of a neighbour, it goes to the side whose nets fit",
+      info(c2b, "MB")[0] in (-54, 54) and (info(c2b, "MB")[1] or info(c2b, "MB")[2]), info(c2b, "MB"))
 
 c3 = ly.create_cell("PACK")
 for name, x in (("MA", 0), ("MB", 500), ("ME", 1000)):
@@ -395,5 +410,35 @@ c = [i for i in npn.each_inst() if i.trans.rot == chain.R0][0]
 check("an upright device next to them does not chain with the flipped ones",
       round(c.dcplx_trans.disp.y, 4) == 0.27 and not c.pcell_parameters_by_name()["abut_left"]
       and round(c.dcplx_trans.disp.x, 4) == 0.162, str(c.dcplx_trans))
+
+# frames of any stack of N and P regions (pcells.frame_rails / frame_geometry, stdcell.draw_frame_regions)
+from openlayout_kl import pcells  # noqa: E402
+check("rails: the classic row (VSS, gate boundary, VDD)", pcells.frame_rails(["N", "P"]) == (["VSS", None, "VDD"], []))
+check("rails: N / P / N (VDD between the P and the top N)",
+      pcells.frame_rails(["N", "P", "N"]) == (["VSS", None, "VDD", "VSS"], []))
+check("rails: N / P / N / P - every region reaches its supply", pcells.frame_rails(["N", "P", "N", "P"])[1] == [],
+      pcells.frame_rails(["N", "P", "N", "P"]))
+check("rails: two P regions share a VDD rail", pcells.frame_rails(["P", "P"]) == (["VDD", "VDD", "VDD"], []))
+rails, warns = pcells.frame_rails(["N", "P"], {2: None})
+check("an override that leaves a region without its supply is warned about", rails[2] is None and warns, warns)
+old = {k: len(v) for k, v in pcells.frame_geometry([("N", 4), ("P", 4)])["shapes"].items() if v}
+check("the classic frame keeps its shapes", old == {"boundary": 2, "nselect": 1, "pselect": 1, "well": 1, "fin": 10,
+                                                    "m1": 2, "lig": 2, "gcut": 4, "gate": 4, "v0": 6}, old)
+st = ly.create_cell("STACK")
+warns = stdcell.draw_frame_regions(st, [("N", 12), ("P", 12), ("N", 8)])
+bnd = [s for s in st.shapes(ly.layer(LAYERS["boundary"], 0)).each()]
+pins = sorted((s.text_string, round(s.dtext.y * 1000)) for s in st.shapes(ly.layer(LAYERS["m1"], 251)).each(pya.Shapes.STexts))
+check("a stack of regions: one stepped boundary, a pin on every rail", not warns and len(bnd) == 1
+      and bnd[0].dpolygon.num_points() == 6 and pins == [("VDD", 270), ("VSS", 0), ("VSS", 405)], (warns, pins))
+fins = pya.Region(st.shapes(ly.layer(LAYERS["fin"], 0)))
+check("... fins on the fin grid in every region, as wide as the region", fins.count() == 15
+      and all(abs((p.bbox().center().y * ly.dbu * 1000 - 13.5) % 27) < 1e-6 for p in fins.each()), fins.count())
+check("... and its layout is stored for the frame window",
+      stdcell.frame_config(st) == {"regions": [("N", 12), ("P", 12), ("N", 8)], "rails": {}, "vt": "rvt"},
+      stdcell.frame_config(st))
+stdcell.draw_frame_regions(st, [("N", 6), ("P", 6)], "lvt")
+check("drawing it again replaces the frame", stdcell.frame_config(st)["regions"] == [("N", 6), ("P", 6)]
+      and abs(stdcell.frame_box(st).top - 0.27) < 1e-9 and len([s for s in st.shapes(ly.layer(LAYERS["m1"], 251)).each()]) == 2,
+      str(stdcell.frame_box(st)))
 
 print("PASS stdcell" if not failures else f"FAIL stdcell: {', '.join(failures)}")

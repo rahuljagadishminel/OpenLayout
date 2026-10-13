@@ -11,8 +11,9 @@ gate and run the diffusion on (PCell parameters abut_left / abut_right).
   cell's standard-cell frame becomes a row transistor first, in the row where it was dropped (its
   fins then sit on the frame's fins whatever its fin count); dropped elsewhere it lands on the gate
   grid with its fins on the 27 nm fin grid. A moved transistor
-  dropped next to a compatible one (same type, row, VT
-  and fin count; up to two gate pitches apart, or overlapping by up to one) snaps into abutment -
+  dropped onto a compatible one (same type, row, VT and fin count) - its outer source/drain on the
+  neighbour's, or overlapping it by up to one more gate pitch - snaps into abutment. Dropped apart,
+  even with the dummy gates side by side or shared, it stays apart: a deliberate diffusion break -
   if the schematic link knows the nets, only when the touching diffusions are on the same net,
   flipping the moved device if that makes them match. Every transistor's abut flags are then set
   from its neighbours, so moving one away restores its dummy gates.
@@ -28,8 +29,8 @@ import pya
 from .connectivity import instance_name
 from .pcells import CELL_HEIGHT, CPP, FIN_PITCH, LIBRARY, ROW_MAX_FINS
 
-SNAP_GAP = 2 * CPP     # dropped this far apart (both dummy gates still there) it still chains
-SNAP_OVERLAP = CPP     # or overlapping the neighbour by up to one more gate pitch
+SNAP_GAP = 0           # chains only where the diffusions meet (dropped apart it stays apart)
+SNAP_OVERLAP = CPP     # or overlap the neighbour by up to one more gate pitch
 ROW_LINE = CELL_HEIGHT // 2   # nm: row transistors' origins snap to multiples of this (5 fin pitches)
 R0, R180, M0, M90 = 0, 2, 4, 6  # Trans rotation codes: none, both, flipped top to bottom, left-right
 ROT = {(False, False): R0, (True, False): M90, (False, True): M0, (True, True): R180}  # (lr, tb)
@@ -134,11 +135,16 @@ def _snap(dev, others, messages):
         for side, shift in (("right", o.left - dev.right), ("left", o.right - dev.left)):
             # side: dev's side facing o; shift: dev's move to make the columns meet
             gap = shift if side == "right" else -shift
-            if -SNAP_OVERLAP <= gap <= SNAP_GAP and (best is None or abs(shift) < abs(best[2])):
-                best = (o, side, shift)
+            if not -SNAP_OVERLAP <= gap <= SNAP_GAP:
+                continue
+            other = "left" if side == "right" else "right"
+            fits = _nets_ok(dev.net(side), o.net(other)) or _nets_ok(dev.flipped_net(side), o.net(other))
+            key = (abs(shift), not fits)       # the nearest; dropped right on top, the side whose nets fit
+            if best is None or key < best[0]:
+                best = (key, o, side, shift)
     if best is None:
         return
-    o, side, shift = best
+    _key, o, side, shift = best
     other_side = "left" if side == "right" else "right"
     if not _nets_ok(dev.net(side), o.net(other_side)):
         if _nets_ok(dev.flipped_net(side), o.net(other_side)):

@@ -74,13 +74,13 @@ def inst_type(inst):
 
 
 def shape_type(layout, layer_index, shape):
-    if shape.is_text():
-        return "label"
     info = layout.get_info(layer_index)
     if info.layer == BOUNDARY:
         return "boundary"
-    if shape.property(PROP) == FRAME_TAG:
+    if shape.property(PROP) == FRAME_TAG:     # the frame's shapes, its rail pin labels too
         return "frame"
+    if shape.is_text():
+        return "label"
     return "pin" if info.datatype == PIN else "shape"
 
 

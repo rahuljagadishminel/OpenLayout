@@ -148,8 +148,16 @@ of the open cell, as plain shapes in the cell itself (no extra hierarchy level -
 selected and edited): a 7.5-track frame (270 nm high, a whole number of 54 nm gate pitches wide)
 with the boundary, n-well / implant split, VT layer, all ten fin rows, the VDD / VSS rails on M1
 (labelled as pins), LIG rails under them (joined to M1 by V0 at every gate pitch), gate cuts and dummy gates at both cell edges - like the ASAP7 library
-cells. Running it again (another width or VT) redraws the frame's shapes; shapes you added yourself
-are kept. As the frame covers the whole cell, a click picks what lies on top of it - the topmost wire,
+cells. The window builds any stack of N and P regions: its rows, listed top to bottom, are each an
+N or a P region (135 nm, five fin tracks) with their own width in gate pitches - *Add row*, *Remove*,
+*Move up* / *Move down*, and *All gate pitches equal* to keep them the same width (the boundary
+steps where they differ). The rails are placed automatically: each outer edge carries its region's
+supply, two regions of the same type share a rail, and an N and a P region pair up across a gate
+boundary (no rail, their gates shared), so that every region reaches its supply - an N / P / N
+stack gets VSS, a gate boundary, VDD between the P and the top N, and VSS on top. Each row's *Rail
+above* (and the bottom edge's) can be set to VDD / VSS / none instead; the preview draws the stack
+and its rails, and a region left without its supply rail is warned about. Running it again redraws
+the frame's shapes (it opens on the cell's current stack); shapes you added yourself are kept. As the frame covers the whole cell, a click picks what lies on top of it - the topmost wire,
 contact or gate first, then a transistor - and only an empty spot picks a frame shape; the hover
 highlight shows the same object a click takes. **Click the same spot again** for the next object
 underneath, down through the stack to the frame's own shapes (its GCUT, fins, rails): the status bar
@@ -208,9 +216,13 @@ origin* mirrors over the cell's own axes instead (the x = 0 / y = 0 lines), and 
 right* turns it. Works on shapes and on PCell / cell instances alike, one undo step each. The two
 mirrors are also in the OpenLayout menu.
 
-**Chaining** (shared diffusion, abutment): drop a transistor next to another of the
-same type and row - touching, or overlapping by up to a gate pitch - and it snaps into the chain:
-the dummy gates between them go and the diffusion runs through. With a schematic link it only
+**Chaining** (shared diffusion, abutment): drop a transistor onto another of the same type and
+row - its outer source/drain on the other's, or overlapping it by up to one more gate pitch - and it
+snaps into the chain. Dropped beside it (dummy gates side by side, or one shared dummy gate), it
+stays where you put it: a deliberate diffusion break, e.g. to line a gate up with its pair in the
+other region. Chained,
+the dummy gates between them go and the diffusion runs through; dropped right on top of a
+neighbour, it goes to the side whose nets fit. With a schematic link it only
 chains when the touching source/drain nets match, flipping the dropped transistor if that makes
 them match. Moving a transistor away again restores its dummy gates. *OpenLayout ▸ Chain Selected
 Transistors* packs the selection into chains left to right. In a transistor's properties (`q`)
