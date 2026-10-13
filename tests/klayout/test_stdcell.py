@@ -135,6 +135,17 @@ src.shapes(lig_li).insert(pya.DBox(0.046, 0.06, 0.062, 0.146))       # ... down 
 check("LIG over a source contact joins it to the gate (a short the check can now see)",
       same_net(src, (0.06, 0.135), (0.054, 0.05), "lig", "lisd"))
 
+# LISD reaches the diffusion only through SDT (as in the LVS deck): a strap over a gate is no short
+xs = ly.create_cell("XSTRAP")
+for name, box in (("active", (0.0, 0.027, 0.2, 0.081)), ("gate", (0.09, 0.0, 0.11, 0.108)),
+                  ("sdt", (0.03, 0.027, 0.054, 0.081)), ("lisd", (0.03, 0.027, 0.054, 0.081)),
+                  ("lisd", (0.03, 0.04, 0.17, 0.068))):
+    xs.shapes(ly.layer(LAYERS[name], 0)).insert(pya.DBox(*box))
+check("LISD over a gate, with SDT on one side only, leaves source and drain apart",
+      not same_net(xs, (0.015, 0.054), (0.185, 0.054), "sd", "sd"))
+xs.shapes(ly.layer(LAYERS["sdt"], 0)).insert(pya.DBox(0.146, 0.027, 0.17, 0.081))
+check("... with SDT on both sides it shorts them", same_net(xs, (0.015, 0.054), (0.185, 0.054), "sd", "sd"))
+
 # chaining: standalone 2-fin nMOS, nets from a schematic link (s/d per instance)
 conn = {"instances": {
     "MA": {"kind": "mos", "type": "nmos", "terminals": {"s": "VSS", "d": "X", "g": "A"}},

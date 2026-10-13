@@ -28,6 +28,9 @@
   transistors snap to the nearest half-row line (fins on the fin grid), a transistor dropped above
   the first row stays in that row, and transistors flipped top to bottom take part in chaining.
   Mirroring or rotating transistors refreshes their dummy gates.
+- **LISD over a gate is no short**: the connectivity check joined LISD to any diffusion under it, so
+  a LISD strap across a gate (as in the ASAP7 flip-flops) showed its source and drain shorted. LISD
+  now reaches the diffusion only through SDT, as in LVS.
 
 ### Verification
 - **Connectivity check**: row transistors' gates are probed over their channel - a gate cut at

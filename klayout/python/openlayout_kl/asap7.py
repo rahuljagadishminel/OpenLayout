@@ -55,8 +55,10 @@ VT_LAYER = {"rvt": None, "lvt": "lvt", "slvt": "slvt", "sram": "sramvt"}
 
 # Conductor connectivity for extraction ("sd" = ACTIVE outside GATE). LIG and LISD are both local
 # interconnect at the same level of the MOL stack: where they overlap they connect (the ASAP7 cells
-# connect sources to the LIG power rails that way - Clark et al., ASAP7 PDK paper, 2016).
-CONNECTIONS = [("gate", "lig"), ("sd", "lisd"), ("lig", "lisd"), ("lig", "v0"), ("lisd", "v0"), ("v0", "m1"),
+# connect sources to the LIG power rails that way - Clark et al., ASAP7 PDK paper, 2016). LISD sits
+# above the gate and reaches the diffusion only through SDT (the trench contact), as in the LVS deck:
+# a LISD strap may run over a gate without shorting its source to its drain.
+CONNECTIONS = [("gate", "lig"), ("sd", "sdt"), ("sdt", "lisd"), ("lig", "lisd"), ("lig", "v0"), ("lisd", "v0"), ("v0", "m1"),
                ("m1", "v1"), ("v1", "m2"), ("m2", "v2"), ("v2", "m3"), ("m3", "v3"), ("v3", "m4"),
                ("m4", "v4"), ("v4", "m5"), ("m5", "v5"), ("v5", "m6"), ("m6", "v6"), ("v6", "m7"),
                ("m7", "v7"), ("v7", "m8"), ("m8", "v8"), ("v8", "m9")]

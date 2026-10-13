@@ -130,7 +130,7 @@ def extract(layout, top):
         return r.merged()
 
     regions = {name: region(name) for name in
-               ["gate", "lig", "lisd", "v0"] + METALS + [f"v{i}" for i in range(1, 9)]}
+               ["gate", "lig", "lisd", "sdt", "v0"] + METALS + [f"v{i}" for i in range(1, 9)]}
     # GCUT removes gate material: without it, dummy gates would tie the rails together.
     drawn_gate = regions["gate"]
     regions["gate"] = drawn_gate - region("gcut")
@@ -171,7 +171,7 @@ def _net_shapes(l2n, regions, net, dbu):
     """The DPolygons of an extracted net on every conductor layer (for outlining a short)."""
     out = []
     for name, r in regions.items():
-        if name == "sd":
+        if name in ("sd", "sdt"):       # the diffusion, and the contacts under LISD
             continue
         for p in l2n.shapes_of_net(net, r, True).merged().each():
             out.append(p.to_dtype(dbu))
